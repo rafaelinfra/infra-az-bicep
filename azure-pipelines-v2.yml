@@ -1,0 +1,186 @@
+trigger:
+- none
+
+pool:
+  vmImage: ubuntu-latest
+
+variables:
+- name: templateFilePath
+  value: '$(System.DefaultWorkingDirectory)/IaC/main.bicep'
+- name: parametersFolderPath
+  value: '$(System.DefaultWorkingDirectory)/IaC/parametersDefault/'
+- name: location
+  value: 'EastUs2'
+- name: serviceConnectionhml
+  value: 'sc-testes'
+- name: serviceConnectionlab
+  value: 'sc-testes'
+- name: serviceConnectiondev
+  value: 'sc-testes'
+- name: serviceConnectionprd
+  value: 'sc-testes'
+
+stages:
+- stage: Lint
+  jobs:
+  - job: LintCode
+    displayName:
+    steps:
+    - script: |
+        az bicep build --file ${{variables.templateFilePath}}
+
+  - job: Publish
+    displayName: Publish Artifacts
+    dependsOn: LintCode
+    steps:
+    - task: CopyFiles@2
+      displayName: 'Copy files'
+      inputs:
+        contents: '**'
+        targetFolder: '$(Build.ArtifactStagingDirectory)'
+
+    - publish: '$(Build.ArtifactStagingDirectory)'
+      displayName: 'Publish files'
+      artifact: drop
+
+- stage: Validate
+  jobs:
+  - job: ValidateBicepCode
+    displayName: 'Validate Bicep code'
+    steps:
+    - download: current
+      artifact: drop
+    - task: AzureCLI@2
+      name: RunPreflightValidation
+      displayName: 'Run preflight validation'
+      inputs:
+        azureSubscription: ${{variables.serviceConnectionlab}}
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az deployment sub validate \
+          --location ${{variables.location}} \
+          --template-file $(Pipeline.Workspace)/drop/IaC/main.bicep \
+          --parameters $(Pipeline.Workspace)/drop/IaC/parametersDefault/lab.parameters.json \
+          --name $(Build.BuildNumber)
+  
+  - job: Preview
+    displayName: 'Preview Azure Changes'
+    dependsOn: ValidateBicepCode
+    steps:
+    - download: current
+      artifact: drop
+    - task: AzureCLI@2
+      name: RunWhatIf
+      displayName: 'Run what-if'
+      inputs:
+        azureSubscription: ${{variables.serviceConnectionlab}}
+        scriptType: 'bash'
+        scriptLocation: 'inlineScript'
+        inlineScript: |
+          az deployment sub what-if \
+          --location ${{variables.location}} \
+          --template-file $(Pipeline.Workspace)/drop/IaC/main.bicep \
+          --parameters $(Pipeline.Workspace)/drop/IaC/parametersDefault/lab.parameters.json \
+          --name $(Build.BuildNumber)
+
+# - stage: deployHML
+#   jobs:
+#   - deployment: DeployInfrastructure
+#     displayName: Deploy infrastructure HML
+# #    environment: 'deployprd'
+#     strategy:
+#       runOnce:
+#         deploy:
+#           steps:
+#             - download: current
+#               artifact: drop
+#             - task: AzureCLI@2
+#               name: DeployBicepFile
+#               displayName: Deploy Bicep file
+#               inputs:
+#                 azureSubscription: ${{variables.serviceConnectionhml}}
+#                 scriptType: 'bash'
+#                 scriptLocation: 'inlineScript'
+#                 inlineScript: |
+#                   az deployment sub create \
+#                     --location ${{variables.location}} \
+#                     --template-file $(Pipeline.Workspace)/drop/IaC/main.bicep \
+#                     --parameters $(Pipeline.Workspace)/drop/IaC/parametersDefault/hml.parameters.json \
+#                     --name $(Build.DefinitionName)-$(Build.BuildNumber)
+
+- stage: deployLAB
+  jobs:
+  - deployment: DeployInfrastructure
+    displayName: Deploy infrastructure LAB
+    environment: 'deployprd'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - download: current
+              artifact: drop
+            - task: AzureCLI@2
+              name: DeployBicepFile
+              displayName: Deploy Bicep file
+              inputs:
+                azureSubscription: ${{variables.serviceConnectionlab}}
+                scriptType: 'bash'
+                scriptLocation: 'inlineScript'
+                inlineScript: |
+                  az deployment sub create \
+                    --location ${{variables.location}} \
+                    --template-file $(Pipeline.Workspace)/drop/IaC/main.bicep \
+                    --parameters $(Pipeline.Workspace)/drop/IaC/parametersDefault/lab.parameters.json \
+                    --name $(Build.DefinitionName)-$(Build.BuildNumber)
+
+# - stage: deployDEV
+#   jobs:
+#   - deployment: DeployInfrastructure
+#     displayName: Deploy infrastructure DEV
+# #    environment: 'deployprd'
+#     strategy:
+#       runOnce:
+#         deploy:
+#           steps:
+#             - download: current
+#               artifact: drop
+#             - task: AzureCLI@2
+#               name: DeployBicepFile
+#               displayName: Deploy Bicep file
+#               inputs:
+#                 azureSubscription: ${{variables.serviceConnectiondev}}
+#                 scriptType: 'bash'
+#                 scriptLocation: 'inlineScript'
+#                 inlineScript: |
+#                   az deployment sub create \
+#                     --location ${{variables.location}} \
+#                     --template-file $(Pipeline.Workspace)/drop/IaC/main.bicep \
+#                     --parameters $(Pipeline.Workspace)/drop/IaC/parametersDefault/dev.parameters.json \
+#                     --name $(Build.DefinitionName)-$(Build.BuildNumber)
+
+# - stage: deployPRD
+#   jobs:
+#   - deployment: DeployInfrastructure
+#     displayName: Deploy infrastructure PRD
+#     environment: 'deployprd'
+#     strategy:
+#       runOnce:
+#         deploy:
+#           steps:
+#             - download: current
+#               artifact: drop
+#             - task: AzureCLI@2
+#               name: DeployBicepFile
+#               displayName: Deploy Bicep file
+#               inputs:
+#                 azureSubscription: ${{variables.serviceConnectionprd}}
+#                 scriptType: 'bash'
+#                 scriptLocation: 'inlineScript'
+#                 inlineScript: |
+#                   az deployment sub create \
+#                     --location ${{variables.location}} \
+#                     --template-file $(Pipeline.Workspace)/drop/IaC/main.bicep \
+#                     --parameters $(Pipeline.Workspace)/drop/IaC/parametersDefault/prd.parameters.json \
+#                     --name $(Build.DefinitionName)-$(Build.BuildNumber)
+
